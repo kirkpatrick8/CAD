@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DWG to GeoJSON Converter</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dxf-parser/1.1.1/dxf-parser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        #drop_zone { border: 2px dashed #ccc; border-radius: 20px; width: 100%; margin: 20px 0; padding: 20px; text-align: center; }
+        #drop_zone.highlight { background-color: #eee; }
+        #downloadBtn { display: none; }
+    </style>
+</head>
+<body>
+    <h1>DWG to GeoJSON Converter</h1>
+    <p>Drag and drop a DWG file or click to select</p>
+    <div id="drop_zone">
+        <input type="file" id="fileInput" accept=".dwg" style="display: none;">
+        <label for="fileInput">Choose a file or drag it here</label>
+    </div>
+    <button id="downloadBtn">Download GeoJSON</button>
+    <div id="output"></div>
+
+    <script>
+        const dropZone = document.getElementById('drop_zone');
+        const fileInput = document.getElementById('fileInput');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const output = document.getElementById('output');
+        let geojsonOutput = null;
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight() {
+            dropZone.classList.add('highlight');
+        }
+
+        function unhighlight() {
+            dropZone.classList.remove('highlight');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+        fileInput.addEventListener('change', handleFiles, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        function handleFiles(files) {
+            if (files.length) {
+                const file = files[0];
+                if (file.name.toLowerCase().endsWith('.dwg')) {
+                    convertDWGtoGeoJSON(file);
+                } else {
+                    output.textContent = 'Please select a DWG file.';
+                }
+            }
+        }
+
+        function convertDWGtoGeoJSON(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const parser = new DxfParser();
+                try {
+                    const dxf = parser.parseSync(e.target.result);
+                    const geojson = dxfToGeoJSON(dxf);
+                    geojsonOutput = geojson;
+                    output.textContent = 'Conversion successful! Click the download button to save your GeoJSON file.';
+                    downloadBtn.style.display = 'block';
+                } catch (err) {
+                    output.textContent = 'Error parsing DWG file: ' + err.message;
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function dxfToGeoJSON(dxf) {
+            const features = [];
+            for (const entity of dxf.entities) {
+                let geometry = null;
+                switch (entity.type) {
+                    case 'LINE':
+                        geometry = {
+                            type: 'LineString',
+                            coordinates: [
+                                [entity.start.x, entity.start.y],
+                                [entity.end.x, entity.end.y]
+                            ]
+                        };
+                        break;
+                    case 'POINT':
+                        geometry = {
+                            type: 'Point',
+                            coordinates: [entity.position.x, entity.position.y]
+                        };
+                        break;
+                    case 'LWPOLYLINE':
+                    case 'POLYLINE':
+                        geometry = {
+                            type: 'LineString',
+                            coordinates: entity.vertices.map(v => [v.x, v.y])
+                        };
+                        if (entity.shape && entity.shape.closed) {
+                            geometry.type = 'Polygon';
+                            geometry.coordinates = [geometry.coordinates];
+                        }
+                        break;
+                    // Add more cases for other entity types as needed
+                }
+                if (geometry) {
+                    features.push({
+                        type: 'Feature',
+                        geometry: geometry,
+                        properties: {
+                            type: entity.type,
+                            layer: entity.layer
+                        }
+                    });
+                }
+            }
+            return {
+                type: 'FeatureCollection',
+                features: features
+            };
+        }
+
+        downloadBtn.addEventListener('click', function() {
+            if (geojsonOutput) {
+                const blob = new Blob([JSON.stringify(geojsonOutput)], {type: "application/json;charset=utf-8"});
+                saveAs(blob, "converted_drawing.geojson");
+            }
+        });
+    </script>
+</body>
+</html>
